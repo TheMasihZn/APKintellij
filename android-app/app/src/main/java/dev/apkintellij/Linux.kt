@@ -1,32 +1,71 @@
 package dev.apkintellij
 
 import android.content.Context
+import android.system.Os
 import java.io.File
 
-/** Where the bundled Linux userspace lives on the device, and how proot is started. */
+/**
+ * Where the Linux userspace lives on the device, what is installed in it, and how proot starts it.
+ *
+ * Two parts are installed separately from files the user keeps anywhere on the phone:
+ *  - the Linux image (`apkintellij-linux-*.tar.xz`, built by scripts/build-rootfs.sh), and
+ *  - IntelliJ itself (the JetBrains `*-aarch64.tar.gz`, or a build from this repository),
+ * so updating the APK or IntelliJ never means downloading the other parts again.
+ */
 class Linux(private val context: Context) {
   val rootfs = File(context.filesDir, "rootfs")
+  val ideDir = File(rootfs, "opt/idea")
   val fakeProc = File(context.filesDir, "fake-proc")
   val prootTmp = File(context.filesDir, "proot-tmp")
   val log = File(context.filesDir, "linux.log")
-  private val marker = File(rootfs, ".apkintellij-rootfs")
+  private val imageMarker = File(context.filesDir, "installed-image.txt")
+  private val ideMarker = File(context.filesDir, "installed-ide.txt")
   private val nativeLibDir = File(context.applicationInfo.nativeLibraryDir)
 
-  /** The rootfs build id shipped inside this APK, written by scripts/build-rootfs.sh. */
-  fun bundledVersion(): String =
-    context.assets.open(ROOTFS_VERSION_ASSET).bufferedReader().use { it.readText().trim() }
+  /** File name of the installed Linux image, or null. */
+  fun installedImage(): String? =
+    imageMarker.takeIf { it.isFile && File(rootfs, "bin").exists() }?.readText()?.trim()
 
-  fun installedVersion(): String? = if (marker.isFile) marker.readText().trim() else null
+  /** File name of the installed IntelliJ archive, or null. */
+  fun installedIde(): String? =
+    ideMarker.takeIf { it.isFile && File(ideDir, "bin/idea.sh").isFile }?.readText()?.trim()
 
-  fun isInstalled(): Boolean = installedVersion() == bundledVersion()
+  fun markImage(name: String?) = mark(imageMarker, name)
+  fun markIde(name: String?) = mark(ideMarker, name)
 
-  fun markInstalled(version: String) = marker.writeText(version)
+  private fun mark(file: File, name: String?) {
+    if (name == null) file.delete() else file.writeText(name)
+  }
+
+  fun isReady(): Boolean = installedImage() != null && installedIde() != null
+
+  /**
+   * Copies the app-owned files (start script, VM options, viewer page, menus) into the rootfs.
+   * Done on every start, so an APK update can change them without a new Linux image.
+   */
+  fun syncOverlay() {
+    copyAssetDir("overlay", rootfs)
+    Os.chmod(File(rootfs, "opt/apkintellij/start.sh").path, 0x1ed) // 0755
+  }
+
+  private fun copyAssetDir(assetPath: String, target: File) {
+    val children = context.assets.list(assetPath).orEmpty()
+    if (children.isEmpty()) {
+      target.parentFile?.mkdirs()
+      if (target.isDirectory) return
+      target.delete()
+      context.assets.open(assetPath).use { input -> target.outputStream().use { input.copyTo(it) } }
+      return
+    }
+    target.mkdirs()
+    for (child in children) copyAssetDir("$assetPath/$child", File(target, child))
+  }
 
   /**
    * The command that boots the rootfs and runs /opt/apkintellij/start.sh, which starts the
-   * VNC server, the window manager, the noVNC bridge on [VIEWER_PORT] and IntelliJ.
+   * VNC server, the window manager, the viewer bridge on [VIEWER_PORT] and IntelliJ.
    */
-  fun command(width: Int, height: Int): List<String> {
+  fun command(width: Int, height: Int, dpi: Int): List<String> {
     val cmd = mutableListOf(
       File(nativeLibDir, "libproot.so").path,
       "--kill-on-exit",
@@ -58,6 +97,7 @@ class Linux(private val context: Context) {
       "TMPDIR=/tmp",
       "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
       "VNC_GEOMETRY=${width}x$height",
+      "VNC_DPI=$dpi",
       "VIEWER_PORT=$VIEWER_PORT",
       "/bin/bash", "/opt/apkintellij/start.sh",
     )
@@ -71,9 +111,8 @@ class Linux(private val context: Context) {
   )
 
   companion object {
-    const val ROOTFS_ASSET = "rootfs.tar.xz"
-    const val ROOTFS_VERSION_ASSET = "rootfs.version"
     const val VIEWER_PORT = 6080
+    const val VIEWER_URL = "http://127.0.0.1:$VIEWER_PORT/viewer.html"
 
     /** Stand-ins for /proc files Android denies to apps (same idea as proot-distro). */
     val FAKE_PROC_FILES = mapOf(

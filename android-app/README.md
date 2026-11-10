@@ -1,67 +1,70 @@
-# IntelliJ for Samsung DeX (APK)
+# APKintellij: IntelliJ IDEA on Android (Galaxy Z Fold, Samsung DeX)
 
-One APK that contains a small Debian Linux, IntelliJ IDEA (Linux ARM64 build with its own
-JetBrains Runtime) and a display server, and shows the IDE as a normal resizable DeX window.
+A small Android app that runs IntelliJ IDEA in a Debian Linux userspace (proot) and shows it as a
+normal resizable window. It is made of three parts that update independently:
+
+| Part | File | Where it comes from | How often it changes |
+|---|---|---|---|
+| App | `APKintellij-<version>.apk` (a few MB) | *Android APK* workflow / Releases | often |
+| Linux image | `apkintellij-linux-<n>.tar.xz` (~300 MB) | *Linux image* workflow / Releases | rarely |
+| IntelliJ | `idea-<version>-aarch64.tar.gz` (~1 GB) | jetbrains.com (Linux ARM64), or your own build | when you upgrade the IDE |
+
+Updating the app never re-downloads Linux or IntelliJ: they are unpacked once into the app's
+storage, and the archives can then be moved, kept on an SD card, or deleted.
+
+## First install
+
+1. Install the APK.
+2. Put the Linux image and the IntelliJ archive anywhere on the phone. Files named like the table
+   above in **Download/** or an **APKintellij/** folder are found automatically (after you allow
+   storage access); anything else, including SD cards and USB drives, can be chosen with the
+   file picker.
+3. In the app's setup screen install the Linux image first, then IntelliJ, then tap **Start IntelliJ**.
+
+To update IntelliJ or the Linux image later, open **⋯ › Linux and IntelliJ: install or update**
+and pick the new file. Your projects in `/root` and IntelliJ's settings are kept.
+
+## Galaxy Z Fold and touch use
+
+* **Flex mode** (half folded, laptop posture): IntelliJ takes the top half; the bottom half shows
+  the key bar and a grid of IDE shortcuts (Search everywhere, Find action, Complete, Quick fix,
+  Run, Debug, …).
+* **Cover screen / inner screen / DeX**: switching screens, folding, unfolding, split screen and
+  pop-up windows resize the Linux desktop to the new window size.
+* **Soft keyboard**: tap ⌨ on the key bar. Typing goes straight into IntelliJ (no autocorrect);
+  while it is open the desktop keeps its size and scrolls instead of re-laying out.
+* **Key bar**: Esc, Tab, sticky Ctrl/Alt/Shift (tap Ctrl, then a key), arrows, Home/End,
+  PgUp/PgDn, Del, F1–F12, fullscreen (⛶) and the menu (⋯). Hide it from the menu when using a
+  hardware keyboard.
+* **Fullscreen** (⛶) hides Android's status and navigation bars; swipe from an edge to peek.
+* Touch: tap to click, drag to select, long-press for right click, two-finger drag to scroll.
 
 ## How it works
 
 ```
-Android app (this project)
- ├─ LinuxService ── proot ──► Debian arm64 rootfs (unpacked from the APK on first launch)
- │                              ├─ Xvnc :1          (X display, resizes with the DeX window)
- │                              ├─ openbox          (window manager, IntelliJ maximized, no frame)
- │                              ├─ websockify/noVNC (127.0.0.1:6080 only)
- │                              └─ /opt/idea/bin/idea.sh
- └─ MainActivity ── WebView ──► http://127.0.0.1:6080/vnc.html (mouse + keyboard go straight to the IDE)
+MainActivity ── WebView ──► http://127.0.0.1:6080/viewer.html (noVNC core, our minimal UI)
+LinuxService ── proot ──► Debian arm64 rootfs
+                           ├─ Xvnc :1 (resizes with the window)   ├─ openbox
+                           ├─ websockify (127.0.0.1 only)          └─ /opt/idea/bin/idea.sh
 ```
 
-* **Why proot and not a VM:** Android only lets system apps start real virtual machines (AVF), and
-  Samsung phones don't offer it at all. Emulating a whole kernel with QEMU would be far too slow for
-  IntelliJ. proot runs Debian's programs directly on the phone's CPU using Android's own kernel, so
-  the IDE runs at close to native speed.
-* `proot` comes from the Termux project's Android builds (`scripts/fetch-proot.sh`).
-* The rootfs is built with Docker (`scripts/build-rootfs.sh`) and stored in the APK as
-  `assets/rootfs.tar.xz`, so nothing is downloaded on the phone.
+The start script, VM options and viewer page ship in the APK (`app/src/main/assets/overlay`) and
+are copied into Linux on every start, so they can change with an app update.
 
-## Getting the APK
+Android only lets system apps start real virtual machines and Samsung does not offer one, so the
+app uses proot (from Termux's Android builds), which runs Linux programs at native speed on
+Android's own kernel.
 
-The APK is built by GitHub Actions (workflow **Android APK (IntelliJ for Samsung DeX)**).
-Open the latest run under the repository's *Actions* tab and download the `APKintellij-dex-apk`
-artifact. To bundle a specific IntelliJ version, run the workflow manually and paste the
-`.tar.gz` link for *Linux ARM64* from jetbrains.com into `idea_url`.
+## Building
 
-To build locally you need Docker with arm64 emulation, the Android SDK, `patchelf`, `jq` and `xz`:
+* APK: `./scripts/fetch-proot.sh && ./gradlew assembleRelease` (JDK 17, Android SDK 35).
+* Linux image: `./scripts/build-rootfs.sh` (Docker with arm64 emulation) → `out/`.
 
-```bash
-cd android-app
-./scripts/fetch-proot.sh
-./scripts/build-rootfs.sh
-./gradlew assembleRelease   # app/build/outputs/apk/release/app-release.apk
-```
+Both run in GitHub Actions; on `master` each publishes a GitHub Release.
 
-## Installing on the phone
-
-1. Copy the APK to the phone and open it (allow "Install unknown apps" for your file manager).
-   The APK is large (around 1 GB) because IntelliJ is inside it.
-2. Start **IntelliJ for DeX**. The first launch unpacks Linux and IntelliJ, which takes a few minutes
-   and about 3–4 GB of storage.
-3. Allow notifications: the app keeps a "IntelliJ is running" notification so Android doesn't stop
-   the IDE in the background. Use its **Stop** button to shut everything down.
-
-Recommended phone settings:
+## Recommended phone settings
 
 * **Settings › Battery › Background usage limits**: add the app to *Never sleeping apps*.
-* **Android 14+:** *Developer options › Disable child process restrictions* on. On Android 12–13 run
-  `adb shell settings put global settings_enable_monitor_phantom_procs false` once. Without this,
-  Android may kill IntelliJ's helper processes (Gradle, git, the compiler daemon).
-* A phone with 8 GB of RAM or more. IntelliJ is given a 2 GB heap
-  (`rootfs-overlay/opt/apkintellij/idea.vmoptions`).
-
-## Using it in DeX
-
-* Resize or maximize the window; the Linux display follows the window size.
-* Mouse and physical keyboard go to IntelliJ. Press **Back twice** to send the app to the background.
-* Right-click the desktop background (visible when IntelliJ is not maximized) for a terminal.
-* Your phone's storage is at `/sdcard` inside Linux once the app has storage access; projects in
-  `/root` live only inside the app and are removed by **Reinstall Linux** or uninstalling the app.
-* If the IDE doesn't come up, the start screen's **Show log** button shows the Linux log.
+* **Android 14+:** *Developer options › Disable child process restrictions*. On Android 12–13:
+  `adb shell settings put global settings_enable_monitor_phantom_procs false`.
+* 8 GB of RAM or more; IntelliJ gets a 2 GB heap (`assets/overlay/opt/apkintellij/idea.vmoptions`).
