@@ -6,6 +6,10 @@ inputs:
     default: ''
     description: 'any custom system properties'
     required: false
+  android_ref:
+    default: ''
+    description: 'JetBrains/android commit or branch to build with (default: the same ref as this repository)'
+    required: false
   swap_size:
     default: '30G'
     description: 'swap file size (e.g. 16G, 30G)'
@@ -64,7 +68,7 @@ runs:
       with:
         repository: JetBrains/android
         path: android
-        ref: ${{github.ref}}
+        ref: ${{inputs.android_ref || github.ref}}
     - name: Build environment
       shell: bash
       # language=bash

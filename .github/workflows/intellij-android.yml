@@ -31,11 +31,30 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v6.0.2
+        with:
+          # enough history to find the last commit synced from JetBrains (see below)
+          fetch-depth: 200
+
+      # This fork is a snapshot of intellij-community. The build also needs JetBrains/android, which
+      # keeps moving; its current master can reference community files this snapshot doesn't have.
+      # Use the JetBrains/android commit from the same moment as the last commit synced from upstream.
+      - name: Find the matching JetBrains/android commit
+        id: android
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          synced=$(git log -1 --format=%cI --committer=intellij-monorepo-bot)
+          [ -n "$synced" ] || { echo "no upstream commit found in the last 200 commits" >&2; exit 1; }
+          sha=$(gh api "repos/JetBrains/android/commits?sha=master&until=$synced&per_page=1" --jq '.[0].sha')
+          [ -n "$sha" ] || { echo "no JetBrains/android commit before $synced" >&2; exit 1; }
+          echo "community synced at $synced -> JetBrains/android $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - name: Build IntelliJ IDEA Community for Linux ARM64
         uses: ./.github/actions/build_ide
         with:
           product: intellij_idea
+          android_ref: ${{ steps.android.outputs.sha }}
           system_properties: >-
             -Dintellij.build.target.os=linux
             -Dintellij.build.target.arch=aarch64
