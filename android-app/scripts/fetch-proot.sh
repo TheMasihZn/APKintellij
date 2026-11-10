@@ -24,20 +24,23 @@ fetch() {
 }
 fetch proot
 fetch libtalloc
+fetch libandroid-shmem
 
 PREFIX=data/data/com.termux/files/usr
 cp "$WORK/proot/$PREFIX/bin/proot" "$OUT/libproot.so"
 cp "$WORK/proot/$PREFIX/libexec/proot/loader" "$OUT/libproot-loader.so"
 cp "$(find "$WORK/libtalloc/$PREFIX/lib" -name 'libtalloc.so.2*' -type f | head -n1)" "$OUT/libtalloc.so"
+# System V shared memory for --sysvipc (Xvnc, the JVM); Android has no shmget of its own.
+cp "$WORK/libandroid-shmem/$PREFIX/lib/libandroid-shmem.so" "$OUT/libandroid-shmem.so"
 
 # Android only extracts files named lib*.so, so the talloc soname has to match that name.
 patchelf --set-soname libtalloc.so "$OUT/libtalloc.so"
 patchelf --replace-needed libtalloc.so.2 libtalloc.so "$OUT/libproot.so"
-patchelf --remove-rpath "$OUT/libproot.so" || true
+for lib in libproot.so libtalloc.so libandroid-shmem.so; do patchelf --remove-rpath "$OUT/$lib" || true; done
 
 # Fail loudly if proot needs a Termux library we don't ship.
-allowed=' libc.so libdl.so libm.so liblog.so libtalloc.so '
-for lib in libproot.so libtalloc.so; do
+allowed=' libc.so libdl.so libm.so liblog.so libtalloc.so libandroid-shmem.so '
+for lib in libproot.so libtalloc.so libandroid-shmem.so; do
   for needed in $(readelf -d "$OUT/$lib" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p'); do
     case "$allowed" in *" $needed "*) ;; *) echo "$lib needs $needed, which is not bundled" >&2; exit 1 ;; esac
   done

@@ -8,6 +8,7 @@ on:
         required: false
         default: ''
   push:
+    branches: [master]
     paths:
       - 'android-app/**'
       - '.github/workflows/android-apk.yml'
