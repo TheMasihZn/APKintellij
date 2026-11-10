@@ -1,0 +1,83 @@
+name: Android APK (IntelliJ for Samsung DeX)
+
+on:
+  workflow_dispatch:
+    inputs:
+      idea_url:
+        description: 'Optional: URL of an IntelliJ Linux ARM64 .tar.gz to bundle (default: latest release)'
+        required: false
+        default: ''
+  push:
+    branches: [master]
+    paths:
+      - 'android-app/**'
+      - '.github/workflows/android-apk.yml'
+  pull_request:
+    paths:
+      - 'android-app/**'
+      - '.github/workflows/android-apk.yml'
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out only the Android app (the IDE sources are not needed)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            android-app
+            .github
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/node_modules /opt/ghc /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Compile the app first (fails fast before the long rootfs build)
+        working-directory: android-app
+        run: ./gradlew --no-daemon compileReleaseKotlin
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends patchelf jq xz-utils
+
+      - name: Fetch proot for Android
+        working-directory: android-app
+        run: ./scripts/fetch-proot.sh
+
+      - name: Build Debian + IntelliJ rootfs
+        working-directory: android-app
+        env:
+          IDEA_URL: ${{ github.event.inputs.idea_url }}
+        run: ./scripts/build-rootfs.sh
+
+      - name: Build APK
+        working-directory: android-app
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          cp android-app/app/build/outputs/apk/release/app-release.apk "out/APKintellij-dex-$(cat android-app/app/src/main/assets/rootfs.version).apk"
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: APKintellij-dex-apk
+          path: out/*.apk
+          compression-level: 0
+          retention-days: 30
