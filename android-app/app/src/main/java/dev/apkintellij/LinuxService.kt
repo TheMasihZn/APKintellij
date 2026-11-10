@@ -35,14 +35,16 @@ class LinuxService : Service() {
     if (process?.isAlive != true) {
       val width = intent?.getIntExtra(EXTRA_WIDTH, 1920) ?: 1920
       val height = intent?.getIntExtra(EXTRA_HEIGHT, 1080) ?: 1080
-      startLinux(width, height)
+      val dpi = intent?.getIntExtra(EXTRA_DPI, 110) ?: 110
+      startLinux(width, height, dpi)
     }
     return START_STICKY
   }
 
-  private fun startLinux(width: Int, height: Int) {
+  private fun startLinux(width: Int, height: Int, dpi: Int) {
     val linux = Linux(this)
-    val builder = ProcessBuilder(linux.command(width, height))
+    linux.syncOverlay()
+    val builder = ProcessBuilder(linux.command(width, height, dpi))
       .directory(filesDir)
       .redirectErrorStream(true)
     builder.environment().putAll(linux.environment())
@@ -122,6 +124,7 @@ class LinuxService : Service() {
     const val ACTION_STOP = "dev.apkintellij.STOP"
     const val EXTRA_WIDTH = "width"
     const val EXTRA_HEIGHT = "height"
+    const val EXTRA_DPI = "dpi"
 
     @Volatile
     var running = false

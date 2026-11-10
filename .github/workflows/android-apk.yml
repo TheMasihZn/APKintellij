@@ -1,16 +1,15 @@
-name: Android APK (IntelliJ for Samsung DeX)
+name: Android APK
+
+# Builds the small app APK (no Linux or IntelliJ inside). The Linux image comes from the
+# "Linux image" workflow and IntelliJ from JetBrains; the app installs both from files on the phone.
 
 on:
   workflow_dispatch:
-    inputs:
-      idea_url:
-        description: 'Optional: URL of an IntelliJ Linux ARM64 .tar.gz to bundle (default: latest release)'
-        required: false
-        default: ''
   push:
     branches: [master]
     paths:
       - 'android-app/**'
+      - '!android-app/scripts/build-rootfs.sh'
       - '.github/workflows/android-apk.yml'
   pull_request:
     paths:
@@ -21,10 +20,13 @@ concurrency:
   group: android-apk-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
   apk:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 30
     steps:
       - name: Check out only the Android app (the IDE sources are not needed)
         uses: actions/checkout@v4
@@ -34,50 +36,44 @@ jobs:
             android-app
             .github
 
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/node_modules /opt/ghc /usr/local/.ghcup /usr/share/swift /opt/hostedtoolcache/CodeQL
-          df -h /
-
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Compile the app first (fails fast before the long rootfs build)
-        working-directory: android-app
-        run: ./gradlew --no-daemon compileReleaseKotlin
-
       - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends patchelf jq xz-utils
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends patchelf
 
       - name: Fetch proot for Android
         working-directory: android-app
         run: ./scripts/fetch-proot.sh
-
-      - name: Build Debian + IntelliJ rootfs
-        working-directory: android-app
-        env:
-          IDEA_URL: ${{ github.event.inputs.idea_url }}
-        run: ./scripts/build-rootfs.sh
 
       - name: Build APK
         working-directory: android-app
         run: ./gradlew --no-daemon assembleRelease
 
       - name: Collect APK
+        id: apk
         run: |
+          version=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' android-app/app/build.gradle.kts)
           mkdir -p out
-          cp android-app/app/build/outputs/apk/release/app-release.apk "out/APKintellij-dex-$(cat android-app/app/src/main/assets/rootfs.version).apk"
+          file="out/APKintellij-$version-${{ github.run_number }}.apk"
+          cp android-app/app/build/outputs/apk/release/app-release.apk "$file"
           ls -lh out
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+          echo "tag=apk-v$version-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: APKintellij-dex-apk
+          name: APKintellij-apk
           path: out/*.apk
-          compression-level: 0
           retention-days: 30
+
+      - name: Publish release (master only)
+        if: github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.apk.outputs.tag }}" "${{ steps.apk.outputs.file }}" \
+            --repo "${{ github.repository }}" --title "App ${{ steps.apk.outputs.tag }}" \
+            --notes "Install this APK. It keeps your installed Linux image, IntelliJ and projects."

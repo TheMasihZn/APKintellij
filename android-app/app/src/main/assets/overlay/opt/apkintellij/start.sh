@@ -9,7 +9,7 @@ mkdir -p "$XDG_RUNTIME_DIR" /tmp/.X11-unix && chmod 700 "$XDG_RUNTIME_DIR" && ch
 rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
 
 echo "[apkintellij] starting Xvnc ${VNC_GEOMETRY:-1920x1080}"
-Xvnc :1 -geometry "${VNC_GEOMETRY:-1920x1080}" -depth 24 -dpi 110 \
+Xvnc :1 -geometry "${VNC_GEOMETRY:-1920x1080}" -depth 24 -dpi "${VNC_DPI:-110}" \
   -SecurityTypes None -localhost -rfbport 5901 -AlwaysShared -AcceptSetDesktopSize \
   -nolisten tcp &
 
@@ -19,7 +19,15 @@ echo "[apkintellij] starting openbox"
 openbox &
 
 echo "[apkintellij] starting noVNC on 127.0.0.1:${VIEWER_PORT:-6080}"
-websockify --web /usr/share/novnc "127.0.0.1:${VIEWER_PORT:-6080}" 127.0.0.1:5901 &
+# viewer.html comes from the app; the noVNC library itself comes from the Linux image.
+ln -sfn /usr/share/novnc/core /opt/apkintellij/web/core
+ln -sfn /usr/share/novnc/vendor /opt/apkintellij/web/vendor
+websockify --web /opt/apkintellij/web "127.0.0.1:${VIEWER_PORT:-6080}" 127.0.0.1:5901 &
+
+if [ ! -x /opt/idea/bin/idea.sh ]; then
+  echo "[apkintellij] IntelliJ is not installed in /opt/idea; opening a terminal instead"
+  exec xterm -fa Monospace -fs 11
+fi
 
 # Keep IntelliJ up: if it is closed (File | Exit), start it again. A terminal is on the
 # desktop's right-click menu for everything else.

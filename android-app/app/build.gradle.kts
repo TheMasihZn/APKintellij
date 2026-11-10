@@ -11,8 +11,8 @@ android {
         applicationId = "dev.apkintellij"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         ndk {
             // proot and the Debian rootfs are arm64 only; every DeX-capable Samsung phone is arm64.
             abiFilters += "arm64-v8a"
@@ -30,11 +30,6 @@ android {
     packaging {
         // proot is executed from nativeLibraryDir, so the .so files must be extracted on install.
         jniLibs.useLegacyPackaging = true
-    }
-
-    androidResources {
-        // The rootfs is already xz-compressed; storing it uncompressed lets us stream it from the APK.
-        noCompress += listOf("xz")
     }
 
     compileOptions {
@@ -56,4 +51,8 @@ android {
 dependencies {
     implementation("org.apache.commons:commons-compress:1.27.1")
     implementation("org.tukaani:xz:1.10")
+    // Galaxy Z Fold: hinge position and posture (flex mode).
+    implementation("androidx.window:window:1.3.0")
+    implementation("androidx.window:window-java:1.3.0")
+    implementation("androidx.core:core:1.13.1")
 }
