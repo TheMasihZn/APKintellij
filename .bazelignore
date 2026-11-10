@@ -15,5 +15,3 @@ platform/sqlite/target
 # specifically ignore .community.root.marker marker file,
 # so Bazel execroot won't be detected as a community root
 .community.root.marker
-# Android launcher app (Gradle project, not part of the IDE build)
-android-app

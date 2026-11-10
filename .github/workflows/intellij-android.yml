@@ -1,0 +1,78 @@
+name: IntelliJ for Android (ARM64)
+
+# Builds IntelliJ IDEA Community from this repository for Linux ARM64 (the build the Android app
+# runs inside its Linux image) and publishes it as an `ide-*` release in the Android runtime repo,
+# TheMasihZn/IntellijCommunityAndroidCentral.
+#
+# Publishing to that repository needs a secret named CENTRAL_REPO_TOKEN: a fine-grained personal
+# access token with "Contents: Read and write" on IntellijCommunityAndroidCentral. Without it the
+# build is still uploaded as an artifact of this run and released in this repository instead.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # weekly, Monday 03:00 UTC
+    - cron: '0 3 * * 1'
+
+concurrency:
+  group: intellij-android
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CENTRAL_REPO: TheMasihZn/IntellijCommunityAndroidCentral
+  ARTIFACTS: out/idea-ce/artifacts
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Build IntelliJ IDEA Community for Linux ARM64
+        uses: ./.github/actions/build_ide
+        with:
+          product: intellij_idea
+          system_properties: >-
+            -Dintellij.build.target.os=linux
+            -Dintellij.build.target.arch=aarch64
+
+      - name: Pick the archive with the bundled runtime
+        id: pick
+        run: |
+          ls -l "$ARTIFACTS"
+          file=$(ls "$ARTIFACTS"/*-aarch64.tar.gz | grep -v -- '-no-jbr' | head -n1)
+          [ -n "$file" ] || { echo "no Linux aarch64 .tar.gz was built" >&2; exit 1; }
+          sha256sum "$file" | tee "$file.sha256"
+          build=$(cat build.txt)
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+          echo "tag=ide-$build-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v6.0.0
+        with:
+          name: intellij-linux-aarch64
+          path: |
+            ${{ steps.pick.outputs.file }}
+            ${{ steps.pick.outputs.file }}.sha256
+          compression-level: 0
+          retention-days: 30
+
+      - name: Publish release
+        env:
+          CENTRAL_TOKEN: ${{ secrets.CENTRAL_REPO_TOKEN }}
+          OWN_TOKEN: ${{ github.token }}
+        run: |
+          notes="IntelliJ IDEA Community ${{ steps.pick.outputs.build }} for Linux ARM64, built from ${{ github.repository }}@${{ github.sha }}. Copy it to the phone (Download or an APKintellij folder) and install it from the app's setup screen; your projects are kept."
+          if [ -n "$CENTRAL_TOKEN" ]; then
+            repo="$CENTRAL_REPO"; export GH_TOKEN="$CENTRAL_TOKEN"
+          else
+            echo "::warning::CENTRAL_REPO_TOKEN is not set; publishing in ${{ github.repository }} instead"
+            repo="${{ github.repository }}"; export GH_TOKEN="$OWN_TOKEN"
+          fi
+          gh release create "${{ steps.pick.outputs.tag }}" \
+            "${{ steps.pick.outputs.file }}" "${{ steps.pick.outputs.file }}.sha256" \
+            --repo "$repo" --title "IntelliJ ${{ steps.pick.outputs.build }} (Android, ARM64)" --notes "$notes"
